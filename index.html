@@ -1,0 +1,437 @@
+<!DOCTYPE html>
+<html lang="uz">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Offline Chess — You vs AI</title>
+<link rel="icon" href="favicon.jpg" />
+<style>
+  :root{
+    --bg:#0b1220;
+    --card:#0f1724;
+    --muted:#9aa0b4;
+    --accent:#6ee7ff;
+    --board-size: min(420px, 80vw); /* responsive board size */
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;
+    background:linear-gradient(180deg,#071022,#07182b);
+    color:#eaf2ff;
+    font-family:Inter,system-ui,Arial;
+    padding:18px;
+    display:flex;
+    justify-content:center;
+  }
+
+  .wrap{
+    width:100%;
+    max-width:1100px;
+    display:grid;
+    grid-template-columns:420px 1fr;
+    gap:18px;
+    align-items:start;
+  }
+  .card{
+    background:linear-gradient(180deg, rgba(255,255,255,0.02), transparent);
+    padding:14px;
+    border-radius:12px;
+    border:1px solid rgba(255,255,255,0.04);
+  }
+  h1{margin:0 0 8px;font-size:18px}
+  .board{
+    /* make perfect square and responsive */
+    width:var(--board-size);
+    height:var(--board-size);
+    display:grid;
+    grid-template-columns:repeat(8,1fr);
+    grid-auto-rows:1fr;
+    border-radius:8px;
+    overflow:hidden;
+    touch-action:manipulation;
+    margin:12px 0;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.5) inset;
+  }
+  .square{
+    width:100%;
+    height:100%;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    user-select:none;
+    /* piece size scales with board size -> 0.65 of square size */
+    font-size: calc(var(--board-size) / 8 * 0.65);
+    line-height:1;
+  }
+  .light{background:#f0d9b5;color:#111}
+  .dark{background:#b58863;color:#111}
+  .square.sel{box-shadow: inset 0 0 0 4px rgba(110,231,255,0.12)}
+  .square.move-to { outline: 3px solid rgba(255,255,255,0.12); }
+  .square.last-from, .square.last-to { outline: 3px dashed rgba(110,231,255,0.35); }
+
+  .controls{display:flex;flex-direction:column;gap:8px}
+  button{
+    background:#092033;
+    color:var(--accent);
+    border:1px solid rgba(255,255,255,0.03);
+    padding:8px;border-radius:8px;cursor:pointer;font-weight:700;
+  }
+  .row{display:flex;gap:8px;align-items:center}
+  .moves{
+    max-height:240px;
+    overflow:auto;
+    padding:12px;
+    background:rgba(255,255,255,0.01);
+    border-radius:8px;
+    margin-top:8px;
+    text-align:center; /* center the "console" */
+  }
+  .moves div{padding:4px 0}
+  .muted{color:var(--muted);font-size:13px}
+  select,input[type=range]{background:transparent;border:1px solid rgba(255,255,255,0.04);color:inherit;padding:6px;border-radius:6px}
+  .statusRow{display:flex;justify-content:space-between;align-items:center;margin-top:8px}
+  @media(max-width:920px){.wrap{grid-template-columns:1fr;}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Offline Chess — You vs AI</h1>
+      <div class="muted">Click a square to select piece, click target to move. Undo, Reset, export PGN.</div>
+      <div style="height:12px"></div>
+
+      <div class="controls">
+        <div class="row">
+          <label class="muted">You play as:</label>
+          <select id="playerSide">
+            <option value="w">White (You)</option>
+            <option value="b">Black (You)</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label class="muted">AI depth:</label>
+          <select id="aiDepth">
+            <option value="1">1 (fast)</option>
+            <option value="2" selected>2 (easy)</option>
+            <option value="3">3 (medium)</option>
+            <option value="4">4 (hard)</option>
+          </select>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button id="undoBtn">Undo</button>
+          <button id="resetBtn">Reset</button>
+          <button id="exportPgn">Export PGN</button>
+        </div>
+
+        <div class="statusRow">
+          <div class="muted">Game status: <span id="status">Ready</span></div>
+          <div class="muted">Tip: Use small depth on mobile</div>
+        </div>
+
+        <div class="muted" style="margin-top:10px">Moves (console):</div>
+        <div class="moves" id="movesList"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <div>
+          <b>Board</b>
+          <div class="muted">8x8 — responsive (touch supported)</div>
+        </div>
+        <div class="muted">Legend: ♔ ♕ ♖ ♗ ♘ ♙</div>
+      </div>
+
+      <div id="board" class="board" role="grid" aria-label="Chess board"></div>
+    </div>
+  </div>
+
+<!-- load chess.js (local file you saved) -->
+<script src="chess.js"></script>
+
+<script>
+/* Minimal offline chess using chess.js + simple minimax AI
+   Fixes applied:
+   - board squares are exact squares using CSS --board-size and grid-auto-rows
+   - font-size of pieces scales with board size
+   - moves "console" (movesList) centered
+   - only one chess.js include
+*/
+
+const UNICODE = {
+  wK: '♔', wQ: '♕', wR: '♖', wB: '♗', wN: '♘', wP: '♙',
+  bK: '♚', bQ: '♛', bR: '♜', bB: '♝', bN: '♞', bP: '♟︎'
+};
+
+const boardEl = document.getElementById('board');
+const movesList = document.getElementById('movesList');
+const statusEl = document.getElementById('status');
+const playerSide = document.getElementById('playerSide');
+const aiDepthEl = document.getElementById('aiDepth');
+const undoBtn = document.getElementById('undoBtn');
+const resetBtn = document.getElementById('resetBtn');
+const exportPgnBtn = document.getElementById('exportPgn');
+
+let game = new Chess(); // from chess.js
+let selected = null;
+let myColor = 'w';
+let thinking = false;
+
+function init(){
+  myColor = playerSide.value;
+  game.reset(); // ensure fresh
+  renderBoard();
+  updateStatus();
+  // if AI plays white, let AI move first
+  if (myColor === 'b'){
+    setTimeout(()=>aiMove(), 200);
+  }
+}
+playerSide.addEventListener('change', ()=> init());
+aiDepthEl.addEventListener('change', ()=>{} );
+
+undoBtn.addEventListener('click', ()=>{
+  if (thinking) return;
+  // undo both sides (if possible)
+  game.undo();
+  game.undo();
+  renderBoard();
+  updateStatus();
+});
+
+resetBtn.addEventListener('click', ()=>{
+  if (thinking) return;
+  game.reset();
+  init();
+});
+
+exportPgnBtn.addEventListener('click', ()=>{
+  const pgn = game.pgn();
+  const blob = new Blob([pgn], {type:'text/plain'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'game.pgn';
+  a.click();
+});
+
+function renderBoard(){
+  boardEl.innerHTML = '';
+  const fen = game.fen();
+  const rows = fen.split(' ')[0].split('/');
+  for (let r=0;r<8;r++){
+    const rank = 8 - r;
+    let fileIndex = 0;
+    const row = rows[r];
+    for (let ch of row){
+      if (isFinite(ch)){
+        const empties = parseInt(ch,10);
+        for (let k=0;k<empties;k++){
+          const file = String.fromCharCode(97 + fileIndex);
+          const sq = file + rank;
+          addSquare(sq, null);
+          fileIndex++;
+        }
+      } else {
+        const color = (ch === ch.toUpperCase()) ? 'w' : 'b';
+        const pieceType = ch.toUpperCase();
+        const key = color + pieceType;
+        const file = String.fromCharCode(97 + fileIndex);
+        const sq = file + rank;
+        addSquare(sq, UNICODE[key]);
+        fileIndex++;
+      }
+    }
+  }
+  highlightLastMove();
+  updateMovesList();
+}
+
+function addSquare(square, pieceGlyph){
+  const sqDiv = document.createElement('div');
+  sqDiv.className = 'square';
+  const file = square.charCodeAt(0) - 97; // a=0..h=7
+  const rank = parseInt(square[1],10)-1; // 0..7
+  const isLight = ((file + rank) % 2 === 0);
+  sqDiv.classList.add(isLight ? 'light' : 'dark');
+  sqDiv.dataset.square = square;
+  sqDiv.textContent = pieceGlyph || '';
+  sqDiv.addEventListener('click', onSquareClick);
+  boardEl.appendChild(sqDiv);
+}
+
+function onSquareClick(e){
+  if (thinking) return;
+  const sq = e.currentTarget.dataset.square;
+  const piece = game.get(sq);
+  const turn = game.turn();
+  if (!selected){
+    if (piece && piece.color === myColor && myColor === turn){
+      selected = sq;
+      markSelected(sq);
+      showMovesFor(sq);
+    }
+  } else {
+    const moveObj = {from: selected, to: sq, promotion: 'q'};
+    const mv = game.move(moveObj);
+    if (mv){
+      selected = null;
+      renderBoard();
+      updateStatus();
+      if (!game.game_over()){
+        setTimeout(()=>aiMove(), 150);
+      }
+    } else {
+      if (piece && piece.color === myColor && myColor === game.turn()){
+        selected = sq;
+        markSelected(sq);
+        showMovesFor(sq);
+      } else {
+        selected = null;
+        clearHighlights();
+      }
+    }
+  }
+}
+
+function markSelected(sq){
+  clearHighlights();
+  const el = boardEl.querySelector(`[data-square="${sq}"]`);
+  if (el) el.classList.add('sel');
+}
+
+function showMovesFor(sq){
+  clearHighlights();
+  markSelected(sq);
+  const moves = game.moves({square: sq, verbose:true});
+  for (const m of moves){
+    const el = boardEl.querySelector(`[data-square="${m.to}"]`);
+    if (el) el.classList.add('move-to');
+  }
+}
+
+function clearHighlights(){
+  boardEl.querySelectorAll('.square').forEach(s=>{
+    s.classList.remove('sel','move-to','last-from','last-to');
+    s.style.outline = '';
+  });
+}
+
+function highlightLastMove(){
+  // clear last move outlines
+  boardEl.querySelectorAll('.square').forEach(s=> s.classList.remove('last-from','last-to'));
+  const history = game.history({verbose:true});
+  if (history.length){
+    const last = history[history.length-1];
+    const fromEl = boardEl.querySelector(`[data-square="${last.from}"]`);
+    const toEl = boardEl.querySelector(`[data-square="${last.to}"]`);
+    if (fromEl) fromEl.classList.add('last-from');
+    if (toEl) toEl.classList.add('last-to');
+  }
+}
+
+function updateStatus(){
+  const turn = game.turn() === 'w' ? 'White' : 'Black';
+  let st = `${turn} to move`;
+  if (game.in_check()) st += ' — CHECK';
+  if (game.in_checkmate()) st = 'Checkmate — ' + (game.turn()==='w'?'Black':'White') + ' wins';
+  if (game.in_draw() || game.in_threefold_repetition() || game.in_stalemate() || game.insufficient_material()) st = 'Draw';
+  statusEl.textContent = st;
+  updateMovesList();
+}
+
+function updateMovesList(){
+  movesList.innerHTML = '';
+  const moves = game.history();
+  for (let i=0;i<moves.length;i+=2){
+    const num = (i/2)+1;
+    const white = moves[i] || '';
+    const black = moves[i+1] || '';
+    const div = document.createElement('div');
+    div.textContent = `${num}. ${white} ${black}`;
+    movesList.appendChild(div);
+  }
+}
+
+/* Simple AI: minimax with alpha-beta */
+const pieceValue = {p:100, n:320, b:330, r:500, q:900, k:20000};
+
+function evaluateBoard(g){
+  let total = 0;
+  const board = g.board();
+  for (let r=0;r<8;r++){
+    for (let f=0;f<8;f++){
+      const sq = board[r][f];
+      if (sq){
+        const val = pieceValue[sq.type] || 0;
+        total += (sq.color === 'w') ? val : -val;
+      }
+    }
+  }
+  return total;
+}
+
+function minimax(g, depth, alpha, beta, isMax){
+  if (depth === 0 || g.game_over()){
+    return {score: evaluateBoard(g)};
+  }
+  const moves = g.moves({verbose:true});
+  // basic ordering: captures first
+  moves.sort((a,b)=> (b.captured?100:0) - (a.captured?100:0));
+  let bestMove = null;
+  if (isMax){
+    let maxEval = -Infinity;
+    for (const m of moves){
+      g.move({from:m.from, to:m.to, promotion: m.promotion});
+      const res = minimax(g, depth-1, alpha, beta, false);
+      g.undo();
+      if (res.score > maxEval){ maxEval = res.score; bestMove = m; }
+      alpha = Math.max(alpha, res.score);
+      if (beta <= alpha) break;
+    }
+    return {score: maxEval, move: bestMove};
+  } else {
+    let minEval = Infinity;
+    for (const m of moves){
+      g.move({from:m.from, to:m.to, promotion: m.promotion});
+      const res = minimax(g, depth-1, alpha, beta, true);
+      g.undo();
+      if (res.score < minEval){ minEval = res.score; bestMove = m; }
+      beta = Math.min(beta, res.score);
+      if (beta <= alpha) break;
+    }
+    return {score: minEval, move: bestMove};
+  }
+}
+
+function aiMove(){
+  if (game.game_over()) return;
+  thinking = true;
+  statusEl.textContent = 'AI is thinking...';
+  const depth = parseInt(aiDepthEl.value,10) || 2;
+  setTimeout(()=>{
+    const turn = game.turn();
+    const isMax = (turn === 'w');
+    const res = minimax(game, depth, -Infinity, Infinity, isMax);
+    if (res && res.move){
+      game.move({from: res.move.from, to: res.move.to, promotion: res.move.promotion});
+    } else {
+      const moves = game.moves({verbose:true});
+      if (moves.length) {
+        const mv = moves[Math.floor(Math.random()*moves.length)];
+        game.move({from: mv.from, to: mv.to, promotion: mv.promotion});
+      }
+    }
+    thinking = false;
+    renderBoard();
+    updateStatus();
+  }, 40);
+}
+
+// start
+init();
+
+</script>
+</body>
+</html>
