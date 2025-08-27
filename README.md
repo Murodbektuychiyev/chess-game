@@ -49,5 +49,5 @@ Loyiha `HTML`, `CSS`, va `JavaScript` asosida qurilgan bo‘lib, `chess.js` kutu
 ---
 
 ## 📝 Litsenziya
-Bu loyiha **opensource** sifatida taqdim etilgan.  
-Siz uni o‘zgartirib, yaxshilab yoki shaxsiy loyihalarda foydalanishingiz mumkin.  
+Ushbu loyiha **MIT License** asosida tarqatiladi.  
+Batafsil ma’lumot uchun [`LICENSE`](LICENSE) faylini ko‘ring.
